@@ -167,3 +167,196 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 
 실시간 서비스에서는 lock을 거의 걸지 않는다. 트래픽이 몰리는데 lock을 걸면 ... 장애 발생 가능성이 크다.
 
+## 확장 기능
+
+스프링 데이터 JPA repo는 인터페이스만 정의하고 구현제는 스프링이 자동으로 셍성
+
+사용자 정의 인터페이스로 내가 정의해서 JPA 인터페이스에 extend하여 사용 가능
+
+근데 비즈니스 로직에 따라 화면, api repo 등 기능에 따라 잘 연결하거나 분리하자.
+
+### Auditing
+
+* JPA : JpaBaseEntity 참조
+
+@PrePersist, @PostPersist, @PreUpdate, @PostUpdate ->> 순수 JPA로 사용
+
+* Spring Data JPA
+
+```java
+
+@EnableJpaAuditing // 이거 필수 추가
+@SpringBootApplication
+public class SpringDataJpaApplication {
+
+    @Bean
+    public AuditorAware<String> auditorAware() {
+        // 원래는 쿠키나 세션 같이 개인정보 id 가져와서 하는 부분
+        return () -> Optional.of(UUID.randomUUID().toString());
+    }
+}
+
+
+@EntityListeners(AuditingEntityListener.class)
+@MappedSuperclass
+@Getter
+public class BaseEntity {
+
+    @CreationTimestamp
+    @Column(updatable = false)
+    private LocalDateTime createDate;
+
+    @LastModifiedDate
+    private LocalDateTime updateDate;
+
+    @CreatedBy
+    @Column(updatable = false)
+    private String createBy;
+
+    @LastModifiedBy
+    private String updateBy;
+}
+
+```
+
+* 전체 적용
+  `@EntityListeners(AuditingEntityListener.class)` 를 생략하고 스프링 데이터 JPA 가 제공하는 이벤 트를 엔티티 전체에 적용하려면 orm.xml에 다음과 같이 등록하면
+  된다.
+
+### 도메인 클래스 컨버터 (web)
+
+음.. 실용성은 글쎄?
+
+### 페이징과 정렬
+
+```yml 
+
+# 글로벌 설정
+spring:
+  data:
+    web:
+      pageable:
+        default-page-size: 10
+        max-page-size: 2000
+```
+
+### 새로운 엔티티 구별 전략
+
+* `save()` 메서드
+    * 새로운 엔티티면 저장( `persist` ) 새로운 엔티티가 아니면 병합( `merge` )
+
+* 새로운 엔티티를 판단하는 기본 전략
+    * 식별자가 객체일 때 `null` 로 판단
+    * 식별자가 자바 기본타입일때 `0` 으로판단
+    * `Persistable` 인터페이스를 구현해서 판단 로직 변경 가능
+
+```java
+
+package org.springframework.data.domain;
+
+public interface Persistable<ID> {
+
+    ID getId();
+
+    boolean isNew();
+}
+
+```
+
+참고: JPA 식별자 생성 전략이 `@GenerateValue` 면 `save()` 호출 시점에 식별자가 없으므로 새로운 엔티티로 인식해서 정상 동작한다.
+
+그런데 JPA 식별자 생성 전략이 `@Id` 만 사용해서 직접 할당이면 이미 식별자 값이 있는 상태로 `save()`를 호출한다.
+
+따라서 이 경우 `merge()`가 호출된다.
+
+`merge()`는 우선 DB를 호출해서 값 을 확인하고, DB에 값이 없으면 새로운 엔티티로 인지하므로 매우 비효율 적이다.
+
+따라서 `Persistable`를 사용해서 새로운 엔티티 확인 여부를 직접 구현하게는 효과적이다.
+
+참고로 등록시간( `@CreatedDate` )을 조합해서 사용하면 이 필드로 새로운 엔티티 여부를 편리하게 확인할 수 있다.
+
+(@CreatedDate에 값이 없으면 새로운 엔티티로 판단)
+
+```java
+package study.datajpa.entity;
+
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.domain.Persistable;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+import javax.persistence.Entity;
+import javax.persistence.EntityListeners;
+import javax.persistence.Id;
+import java.time.LocalDateTime;
+
+@Entity
+@EntityListeners(AuditingEntityListener.class)
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Item implements Persistable<String> {
+
+    @Id
+    private final String id;
+    @CreatedDate
+    private LocalDateTime createdDate;
+
+
+    public Item(String id) {
+        this.id = id;
+    }
+
+
+    @Override
+    public String getId() {
+        return id;
+    }
+
+
+    @Override
+    public boolean isNew() {
+        return createdDate == null;
+    }
+}
+```
+
+### Projection
+
+Specification, Query By Example이 있는데 이건 좀 실무에서 적용하기 빡세다. 간단할때만 사용하자. 아니 그냥 querydsl 쓰자...
+
+Projection 또한 간단한 조회할 때만 사용하는 것으로 결론...
+
+* 정리
+
+    * 프로젝션 대상이 root 엔티티면 유용하다.
+
+    * 프로젝션 대상이 root 엔티티를 넘어가면 JPQL SELECT 최적화가 안된다!
+
+    * 실무의 복잡한 쿼리를 해결하기에는 한계가 있다.
+
+    * 실무에서는 단순할 때만 사용하고, 조금만 복잡해지면 QueryDSL을 사용하자
+
+### 네이티브
+
+```java
+public interface MemberRepository extends JpaRepository<Member, Long> {
+
+    @Query(value = "select * from member where username = ?", nativeQuery = true)
+    Member findByNativeQuery(String username);
+
+
+    @Query(value = "SELECT m.member_id as id, m.username, t.name as teamName "
+            + "FROM member m left join team t ON m.team_id = t.team_id", countQuery = "SELECT count(*) from member", nativeQuery = true)
+    Page<MemberProjection> findByNativeProjection(Pageable pageable);
+}
+
+```
+
+#### 제약
+
+* Sort 파라미터를 통한 정렬이 정상 동작하지 않을 수 있음(믿지 말고 직접 처리)
+
+* JPQL처럼 애플리케이션 로딩 시점에 문법 확인 불가
+
+* 동적 쿼리 불가
+
+**결국은 spring date jpa 기본 기능이외에는 쿼리dsl 쓴다.**

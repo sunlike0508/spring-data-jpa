@@ -18,7 +18,7 @@ import study.datajpa.entity.Member;
 
 
 @Repository
-public interface MemberRepository extends JpaRepository<Member, Long> {
+public interface MemberRepository extends JpaRepository<Member, Long>, MemberRepositoryCustom {
 
     List<Member> findByUsernameAndAgeGreaterThan(String username, int age);
 
@@ -69,4 +69,6 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_READ)
     List<Member> findMemberLockByUsername(String username);
+
+    List<UsernameOnly> findProjectionByUsername(@Param("username") String username);
 }

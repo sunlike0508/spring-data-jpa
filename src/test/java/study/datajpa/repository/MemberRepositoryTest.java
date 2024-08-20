@@ -332,4 +332,39 @@ class MemberRepositoryTest {
         List<Member> findMember = memberRepository.findMemberLockByUsername("member1");
 
     }
+
+
+    @Test
+    void findAllMemberCustom() {
+
+        Member member1 = new Member("member11", 10);
+        Member member2 = new Member("member11", 20);
+
+        memberRepository.save(member1);
+        memberRepository.save(member2);
+
+        List<Member> members = memberRepository.findAllMemberCustom();
+
+        assertThat(members).hasSize(2);
+    }
+
+
+    @Test
+    void projections() {
+        Member member1 = new Member("member1", 10);
+        Member member2 = new Member("member2", 20);
+
+        memberRepository.save(member1);
+        memberRepository.save(member2);
+
+        em.flush();
+        em.clear();
+
+
+        List<UsernameOnly> usernameOnlyList = memberRepository.findProjectionByUsername("member1");
+
+        for(UsernameOnly usernameOnly : usernameOnlyList) {
+            System.out.println(usernameOnly.getUsername());
+        }
+    }
 }
